@@ -19,6 +19,8 @@ using namespace std;
 #include <Windows.h>
 #include <conio.h>
 
+#define WINDOWS_TERMINAL_ANSI_COLOR_SUPPORT
+
 #if defined(WINDOWS_TERMINAL_ANSI_COLOR_SUPPORT)
 
 #define RED             "\033[31m"
