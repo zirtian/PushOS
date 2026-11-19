@@ -1,16 +1,21 @@
 #define PROGRAM_NAME        "PushOS"
-#define PROGRAM_LAST_UPDATE "2024/4/4"
+#define PROGRAM_LAST_UPDATE "2026/11/19"
 #define PROGRAM_VERSION     "0.1.0"
 #define PROGRAM_CREATOR     "ZirconiumTian"
 
 #include <iostream>
 #include <string>
 #include <vector>
-#include <ctime>
 #include <stdio.h>
 #include <stdlib.h>
 
-using namespace std;
+#include <pushos/filesys.hpp>
+
+using std::cout;
+using std::endl;
+using std::string;
+using std::vector;
+using std::cin;
 
 #if defined(_WIN32) || defined(_WIN64)
 
@@ -208,14 +213,6 @@ public:
 		return;
 	}
 
-	string getCurrentTime()
-	{
-		time_t t = time(0);
-		char tmp[32] = "";
-		strftime(tmp, sizeof(tmp), "%Y/%m/%d %H:%M:%S", localtime(&t));
-		return tmp;
-	}
-
 	bool startswith(string str, string start)
 	{
 		int srclen = str.size();
@@ -245,533 +242,9 @@ public:
 		}
 		return false;
 	}
-
-	bool strHasChar(string str, char ch)
-	{
-		for (int i = 0; i < str.length(); i++)
-		{
-			if (str[i] == ch)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
 };
 
 auxiliaryConsoleTools consoleTools;
-
-typedef void (*exe)(vector<string> args);
-
-struct file
-{
-	string name;
-	string lastWriteTime;
-	vector<string> content;
-	bool isExeFile;
-	bool isProtected;
-	exe fileApplicationPart;
-};
-
-struct dir
-{
-	string name;
-	string lastWriteTime;
-	dir* parentDir;
-	vector<dir*> subDirs;
-	vector<file*> subFiles;
-	bool isRootDir;
-	bool isProtected;
-};
-
-namespace fileSystemSign
-{
-	const int FILE_OR_DIRECTORY_NOT_FOUND = -1;
-	const int FILE_OR_DIRECTORY_EXISTS = -2;
-	const int TARGET_IS_A_DIRECTORY = -3;
-	const int PERMISSION_DENIAL = -4;
-	const int OPTION_COMPLETE = -5;
-	const int FILE_TYPE_ERROR = -6;
-}
-
-class fileSystem
-{
-private:
-	dir* currentDir = new dir;
-	string currentPath;
-	bool rootMode;
-
-public:
-	fileSystem()
-	{
-		currentDir->isProtected = true;
-		currentDir->isRootDir = true;
-		currentDir->lastWriteTime = "";
-		currentDir->name = "/";
-		currentDir->parentDir = nullptr;
-		currentPath = "/";
-		rootMode = false;
-	}
-
-	int openFile(string name)
-	{
-		for (size_t i = 0; i < currentDir->subFiles.size(); i++)
-		{
-			if (currentDir->subFiles[i]->name == name)
-			{
-				return i;
-			}
-		}
-		return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-	}
-
-	int openDir(string name)
-	{
-		for (size_t i = 0; i < currentDir->subDirs.size(); i++)
-		{
-			if (currentDir->subDirs[i]->name == name)
-			{
-				return i;
-			}
-		}
-		return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-	}
-
-	dir* changeDirOutside(dir* current, string name)
-	{
-		if (name == ".")
-		{
-			return current;
-		}
-		else if (name == "..")
-		{
-			if (!current->isRootDir)
-			{
-				for (size_t i = 0; i < current->parentDir->subDirs.size(); i++)
-				{
-					if (current->parentDir->subDirs[i]->name == current->name)
-					{
-						current->parentDir->subDirs[i] = current;
-					}
-				}
-				current = current->parentDir;
-			}
-			return current;
-		}
-		else
-		{
-			for (size_t i = 0; i < current->subDirs.size(); i++)
-			{
-				if (current->subDirs[i]->name == name)
-				{
-					current->subDirs[i]->parentDir = current;
-					current = current->subDirs[i];
-					return current;
-				}
-			}
-			return current;
-		}
-	}
-
-	dir* getTargetDir(string fullPath)
-	{
-		vector<string> pathArgs = consoleTools.split(fullPath, "/");
-		dir* targetDir = currentDir;
-		for (;;)
-		{
-			if (targetDir->isRootDir)
-			{
-				break;
-			}
-			targetDir = changeDirOutside(targetDir, "..");
-		}
-		for (size_t i = 0; i < pathArgs.size(); i++)
-		{
-			targetDir = changeDirOutside(targetDir, pathArgs[i]);
-		}
-		return targetDir;
-	}
-
-	string getCurrentPath()
-	{
-		return currentPath;
-	}
-
-	int changeDir(string name)
-	{
-		if (name == ".")
-		{
-			return fileSystemSign::OPTION_COMPLETE;
-		}
-		else if (name == "..")
-		{
-			if (!currentDir->isRootDir)
-			{
-
-				for (size_t i = 0; i < currentDir->parentDir->subDirs.size(); i++)
-				{
-					if (currentDir->parentDir->subDirs[i]->name == currentDir->name)
-					{
-						currentDir->parentDir->subDirs[i] = currentDir;
-					}
-				}
-				currentDir = currentDir->parentDir;
-				for (;;)
-				{
-					if (currentPath.back() == '/')
-					{
-						break;
-					}
-					currentPath.pop_back();
-				}
-				if (!currentDir->isRootDir)
-				{
-					currentPath.pop_back();
-				}
-			}
-			return fileSystemSign::OPTION_COMPLETE;
-		}
-		else
-		{
-			int index = openDir(name);
-			if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-			{
-				return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-			}
-			else
-			{
-				currentDir->subDirs[index]->parentDir = currentDir;
-				currentDir = currentDir->subDirs[index];
-
-				if (currentPath == "/")
-				{
-					currentPath += name;
-				}
-				else
-				{
-					currentPath += "/" + name;
-				}
-				return fileSystemSign::OPTION_COMPLETE;
-			}
-		}
-	}
-
-	void moveToRootDir()
-	{
-		for (;;)
-		{
-			if (currentDir->isRootDir)
-			{
-				break;
-			}
-			changeDir("..");
-		}
-		return;
-	}
-
-	int makeDir(string name, bool isProtected)
-	{
-		int index = openDir(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			dir* newDir = new dir;
-			newDir->isProtected = isProtected;
-			newDir->isRootDir = false;
-			newDir->lastWriteTime = consoleTools.getCurrentTime();
-			newDir->name = name;
-			newDir->parentDir = currentDir;
-			currentDir->subDirs.push_back(newDir);
-			return fileSystemSign::OPTION_COMPLETE;
-		}
-		else
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_EXISTS;
-		}
-	}
-
-	int removeDir(string name)
-	{
-		int index = openDir(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-		}
-		else
-		{
-			if (currentDir->subDirs[index]->isProtected)
-			{
-				if (rootMode)
-				{
-					currentDir->subDirs.erase(currentDir->subDirs.begin() + index);
-					return fileSystemSign::OPTION_COMPLETE;
-				}
-				else
-				{
-					return fileSystemSign::PERMISSION_DENIAL;
-				}
-			}
-			else
-			{
-				currentDir->subDirs.erase(currentDir->subDirs.begin() + index);
-				return fileSystemSign::OPTION_COMPLETE;
-			}
-		}
-	}
-
-	int createFile(string name, vector<string> content, bool isExeFile, bool isProtected, exe fileApplicationPart)
-	{
-		if (name == "." || name == ".." || name == "/" || name == "\\")
-		{
-			return fileSystemSign::TARGET_IS_A_DIRECTORY;
-		}
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			file* newFile = new file;
-			newFile->content = content;
-			newFile->fileApplicationPart = fileApplicationPart;
-			newFile->isExeFile = isExeFile;
-			newFile->isProtected = isProtected;
-			newFile->lastWriteTime = consoleTools.getCurrentTime();
-			newFile->name = name;
-			currentDir->subFiles.push_back(newFile);
-			return fileSystemSign::OPTION_COMPLETE;
-		}
-		else
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_EXISTS;
-		}
-	}
-
-	int removeFile(string name)
-	{
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-		}
-		else
-		{
-			if (currentDir->subFiles[index]->isProtected)
-			{
-				if (rootMode)
-				{
-					currentDir->subFiles.erase(currentDir->subFiles.begin() + index);
-					return fileSystemSign::OPTION_COMPLETE;
-				}
-				else
-				{
-					return fileSystemSign::PERMISSION_DENIAL;
-				}
-			}
-			else
-			{
-				currentDir->subFiles.erase(currentDir->subFiles.begin() + index);
-				return fileSystemSign::OPTION_COMPLETE;
-			}
-		}
-	}
-
-	int readFile(string name)
-	{
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-		}
-		else
-		{
-			if (currentDir->subFiles[index]->isExeFile)
-			{
-				return fileSystemSign::FILE_TYPE_ERROR;
-			}
-			else
-			{
-				for (size_t i = 0; i < currentDir->subFiles[index]->content.size(); i++)
-				{
-					cout << currentDir->subFiles[index]->content[i] << endl;
-				}
-				return fileSystemSign::OPTION_COMPLETE;
-			}
-		}
-	}
-
-	int writeFile(string name)
-	{
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-		}
-		else
-		{
-			if (currentDir->subFiles[index]->isExeFile)
-			{
-				return fileSystemSign::FILE_TYPE_ERROR;
-			}
-			else if (currentDir->subFiles[index]->isProtected)
-			{
-				if (rootMode)
-				{
-					vector<string> newContent;
-					for (;;)
-					{
-						string input;
-						getline(cin, input);
-						if (consoleTools.strHasChar(input, '\x18'))
-						{
-							string newLine;
-							for (int i = 0; i < input.length(); i++)
-							{
-								if (input[i] == '\x18')
-								{
-									break;
-								}
-								newLine += input[i];
-							}
-							newContent.push_back(newLine);
-							currentDir->subFiles[index]->content = newContent;
-							currentDir->subFiles[index]->lastWriteTime = consoleTools.getCurrentTime();
-							return fileSystemSign::OPTION_COMPLETE;
-						}
-						newContent.push_back(input);
-					}
-				}
-				else
-				{
-					return fileSystemSign::PERMISSION_DENIAL;
-				}
-			}
-			else
-			{
-				vector<string> newContent;
-				for (;;)
-				{
-					string input;
-					getline(cin, input);
-					if (consoleTools.strHasChar(input, '\x18'))
-					{
-						string newLine;
-						for (int i = 0; i < input.length(); i++)
-						{
-							if (input[i] == '\x18')
-							{
-								break;
-							}
-							newLine += input[i];
-						}
-						newContent.push_back(newLine);
-						currentDir->subFiles[index]->content = newContent;
-						currentDir->subFiles[index]->lastWriteTime = consoleTools.getCurrentTime();
-						return fileSystemSign::OPTION_COMPLETE;
-					}
-					newContent.push_back(input);
-				}
-			}
-		}
-	}
-
-	int runFile(string name, vector<string> args)
-	{
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-		}
-		else
-		{
-			if (currentDir->subFiles[index]->isExeFile)
-			{
-				currentDir->subFiles[index]->fileApplicationPart(args);
-				return fileSystemSign::OPTION_COMPLETE;
-			}
-			else
-			{
-				return fileSystemSign::FILE_TYPE_ERROR;
-			}
-		}
-	}
-
-	int runFileOutside(dir* targetDir, string name, vector<string> args)
-	{
-		for (size_t i = 0; i < targetDir->subFiles.size(); i++)
-		{
-			if (targetDir->subFiles[i]->name == name)
-			{
-				if (targetDir->subFiles[i]->isExeFile)
-				{
-					targetDir->subFiles[i]->fileApplicationPart(args);
-					return fileSystemSign::OPTION_COMPLETE;
-				}
-				else
-				{
-					return fileSystemSign::FILE_TYPE_ERROR;
-				}
-			}
-		}
-		return fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND;
-	}
-
-	void addStrToFile(string name, string content)
-	{
-		int index = openFile(name);
-		if (index == fileSystemSign::FILE_OR_DIRECTORY_NOT_FOUND)
-		{
-			createFile(name, { content }, false, false, nullptr);
-		}
-		else
-		{
-			if (currentDir->subFiles[index]->isExeFile)
-			{
-				return;
-			}
-			else
-			{
-				currentDir->subFiles[index]->content.push_back(content);
-				currentDir->subFiles[index]->lastWriteTime = consoleTools.getCurrentTime();
-				return;
-			}
-		}
-	}
-
-	void listFiles()
-	{
-		cout << CLEAR;
-		for (size_t i = 0; i < currentDir->subDirs.size(); i++)
-		{
-			cout << currentDir->subDirs[i]->lastWriteTime << "    ";
-			if (currentDir->subDirs[i]->isProtected)
-			{
-				cout << LIGHT_BLUE << currentDir->subDirs[i]->name << " <DIR>" << CLEAR;
-				cout << endl;
-			}
-			else
-			{
-				cout << LIGHT_WHITE << currentDir->subDirs[i]->name << " <DIR>" << CLEAR;
-				cout << endl;
-			}
-		}
-		for (size_t i = 0; i < currentDir->subFiles.size(); i++)
-		{
-			cout << currentDir->subFiles[i]->lastWriteTime << "    ";
-			if (currentDir->subFiles[i]->isExeFile)
-			{
-				cout << LIGHT_GREEN << currentDir->subFiles[i]->name << CLEAR;
-				cout << endl;
-			}
-			else
-			{
-				cout << CLEAR << currentDir->subFiles[i]->name << CLEAR;
-				cout << endl;
-			}
-		}
-	}
-
-	void setRootMode(bool mode)
-	{
-		rootMode = mode;
-	}
-};
 
 fileSystem localFileSystem;
 
@@ -916,7 +389,7 @@ namespace executableFileLibrary
 	{
 		if (args.size() == 1)
 		{
-			localFileSystem.listFiles();
+			localFileSystem.listFiles(CLEAR, LIGHT_BLUE, LIGHT_WHITE, LIGHT_GREEN);
 		}
 		else
 		{
@@ -1499,7 +972,7 @@ public:
 							{
 								currentUserName = input;
 								logoPushOS();
-								cout << consoleTools.getCurrentTime() << ": 以身份 " << input << " 登录到 PushOS" << endl;
+								cout << pushos::getCurrentTime() << ": 以身份 " << input << " 登录到 PushOS" << endl;
 								cout << endl;
 								localFileSystem.moveToRootDir();
 								int code = localFileSystem.changeDir("logs");
@@ -1509,7 +982,7 @@ public:
 								}
 								else
 								{
-									localFileSystem.addStrToFile("login.log", ("[ " + consoleTools.getCurrentTime() + " ] " + input + " 登入 PushOS"));
+									localFileSystem.addStrToFile("login.log", ("[ " + pushos::getCurrentTime() + " ] " + input + " 登入 PushOS"));
 									localFileSystem.moveToRootDir();
 								}
 								localFileSystem.changeDir("users");
@@ -1521,7 +994,7 @@ public:
 						{
 							currentUserName = input;
 							logoPushOS();
-							cout << consoleTools.getCurrentTime() << ": 以身份 " << input << " 登录到 PushOS" << endl;
+							cout << pushos::getCurrentTime() << ": 以身份 " << input << " 登录到 PushOS" << endl;
 							cout << endl;
 							localFileSystem.moveToRootDir();
 							int code = localFileSystem.changeDir("logs");
@@ -1531,7 +1004,7 @@ public:
 							}
 							else
 							{
-								localFileSystem.addStrToFile("login.log", ("[ " + consoleTools.getCurrentTime() + " ] " + input + " 登入 PushOS"));
+								localFileSystem.addStrToFile("login.log", ("[ " + pushos::getCurrentTime() + " ] " + input + " 登入 PushOS"));
 								localFileSystem.moveToRootDir();
 							}
 							localFileSystem.changeDir("users");
@@ -1575,7 +1048,7 @@ void shell()
 			{
 				localFileSystem.moveToRootDir();
 				cout << endl;
-				cout << consoleTools.getCurrentTime() << ": 用户 " << localUserSystem.currentUserName << " 退出登录" << endl;
+				cout << pushos::getCurrentTime() << ": 用户 " << localUserSystem.currentUserName << " 退出登录" << endl;
 				cout << endl;
 				int code = localFileSystem.changeDir("PushOS");
 				code = localFileSystem.changeDir("logs");
@@ -1585,7 +1058,7 @@ void shell()
 				}
 				else
 				{
-					localFileSystem.addStrToFile("login.log", ("[ " + consoleTools.getCurrentTime() + " ] " + localUserSystem.currentUserName + " 离开了 PushOS"));
+					localFileSystem.addStrToFile("login.log", ("[ " + pushos::getCurrentTime() + " ] " + localUserSystem.currentUserName + " 离开了 PushOS"));
 					localFileSystem.moveToRootDir();
 				}
 				return;
