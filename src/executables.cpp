@@ -1,8 +1,3 @@
-/**
- * @file       executables.cpp
- * @author     ZirconiumTian
- */
-
 #include "pushos/pushos.hpp"
 #include "pushos/strextens.hpp"
 

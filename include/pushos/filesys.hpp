@@ -1,10 +1,3 @@
-/**
- * @file       filesys.hpp
- * @brief      Declares the PushOS virtual file system types
- *             and controller.
- * @author     ZirconiumTian
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -31,11 +24,6 @@ enum FsResult : int8_t {
 	Unknown
 };
 
-/**
- * @brief      Represents a basic file system node.
- *             Stores its name, owner, creation and modification times,
- *             and protection code.
- */
 struct Node {
 	std::string file_name;
 	std::string owner;
@@ -45,10 +33,6 @@ struct Node {
 	virtual bool isDir();
 };
 
-/**
- * @brief      Represents a file.
- *             Stores text content and an executable callback pointer.
- */
 struct File : Node {
 	std::string file_content;
 	exeptr_t executable_part = nullptr;
@@ -67,12 +51,6 @@ struct File : Node {
 	int64_t execute(UserFsctl*, const std::vector<std::string>&);
 };
 
-/**
- * @brief      Represents a directory.
- *             Stores child nodes and a pointer to the parent directory.
- *             Supports adding, removing, and finding child entries,
- *             including looking up subdirectories by name.
- */
 struct Dir : Node, std::enable_shared_from_this<Dir> {
 	Dir *parent_dir = nullptr;
 	std::vector<Node*> sub_files;

@@ -1,9 +1,3 @@
-/**
- * @file       strextens.hpp
- * @brief      Utility functions for string processing.
- * @author     ZirconiumTian
- */
-
 #pragma once
 
 #include <ctype.h>
@@ -14,7 +8,6 @@
 namespace pushos {
 namespace strextens {
 
-/** @brief Removes leading and trailing whitespace from a string. */
 inline void trim(std::string& str) {
 	std::string::size_type start = 0;
 	auto end = str.size();
@@ -28,10 +21,6 @@ inline bool stringHas(std::string_view str, char ch) {
 	return str.find_first_of(ch) != std::string_view::npos;
 }
 
-/**
- * @brief      Splits on the full delimiter, preserving empty fields. An
- *             empty delimiter returns the input as one field.
- */
 inline std::vector<std::string> split(std::string_view input, std::string_view delimiter) {
 	if (delimiter.empty()) return {std::string(input)};
 	std::vector<std::string> result;
@@ -46,11 +35,6 @@ inline std::vector<std::string> split(std::string_view input, std::string_view d
 	return result;
 }
 
-/**
- * @brief      Splits a path string into its components.
- * @param      path The input path, such as `/usr/bin/g++.exe`.
- * @return     The path components, such as `{"/", "usr", "bin", "g++.exe"}`.
- */
 inline std::vector<std::string> splitPath(std::string_view path) {
 	std::string str{path};
 	trim(str);
@@ -71,7 +55,6 @@ inline std::vector<std::string> splitPath(std::string_view path) {
 	return path_args;
 }
 
-/** @brief Joins path components into a path string. */
 inline std::string makePath(const std::vector<std::string>& path_args) {
 	std::string path;
 	for (const auto& component : path_args) {

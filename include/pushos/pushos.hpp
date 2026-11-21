@@ -1,9 +1,3 @@
-/**
- * @file       pushos.hpp
- * @author     ZirconiumTian
- * @brief      ?
- */
-
 #pragma once
 
 #include "filesys.hpp"

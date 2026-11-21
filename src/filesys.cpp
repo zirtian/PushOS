@@ -1,9 +1,3 @@
-/**
- * @file       filesys.cpp
- * @brief      Implements virtual file and directory operations for PushOS.
- * @author     ZirconiumTian
- */
-
 #include "pushos/filesys.hpp"
 #include "pushos/strextens.hpp"
 
