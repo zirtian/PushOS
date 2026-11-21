@@ -18,8 +18,8 @@ namespace strextens {
 inline void trim(std::string& str) {
 	std::string::size_type start = 0;
 	auto end = str.size();
-	while (start < end && isspace(str[start])) start++;
-	while (end > start && isspace(str[end - 1])) end--;
+	while (start < end && isspace(static_cast<unsigned char>(str[start]))) start++;
+	while (end > start && isspace(static_cast<unsigned char>(str[end - 1]))) end--;
 	str.erase(end);
 	str.erase(0, start);
 }
@@ -29,12 +29,30 @@ inline bool stringHas(std::string_view str, char ch) {
 }
 
 /**
+ * @brief      Splits on the full delimiter, preserving empty fields. An
+ *             empty delimiter returns the input as one field.
+ */
+inline std::vector<std::string> split(std::string_view input, std::string_view delimiter) {
+	if (delimiter.empty()) return {std::string(input)};
+	std::vector<std::string> result;
+	auto start = std::string_view::size_type{0};
+	auto end = input.find(delimiter, start);
+	while (end != std::string_view::npos) {
+		result.emplace_back(input.substr(start, end - start));
+		start = end + delimiter.size();
+		end = input.find(delimiter, start);
+	}
+	result.emplace_back(input.substr(start));
+	return result;
+}
+
+/**
  * @brief      Splits a path string into its components.
  * @param      path The input path, such as `/usr/bin/g++.exe`.
  * @return     The path components, such as `{"/", "usr", "bin", "g++.exe"}`.
  */
 inline std::vector<std::string> splitPath(std::string_view path) {
-	std::string str = path.data();
+	std::string str{path};
 	trim(str);
 	std::vector<std::string> path_args;
 	if (!str.empty() && str.front() == '/') {

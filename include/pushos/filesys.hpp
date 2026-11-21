@@ -8,15 +8,19 @@
 #pragma once
 
 #include <stdint.h>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace pushos {
+struct Device;
+struct UserFsctl;
+
 namespace filesys {
 
-/** @brief  */
-using exeptr_t = int64_t(*)(const std::vector<std::string>&);
+using args_t = std::vector<std::string>;
+using exeptr_t = int64_t(*)(UserFsctl*, const args_t&);
 
 enum FsResult : int8_t {
 	Success,
@@ -60,7 +64,7 @@ struct File : Node {
 		return false;
 	}
 
-	int64_t execute(const std::vector<std::string>&);
+	int64_t execute(UserFsctl*, const std::vector<std::string>&);
 };
 
 /**
@@ -69,12 +73,13 @@ struct File : Node {
  *             Supports adding, removing, and finding child entries,
  *             including looking up subdirectories by name.
  */
-struct Dir : Node {
+struct Dir : Node, std::enable_shared_from_this<Dir> {
 	Dir *parent_dir = nullptr;
 	std::vector<Node*> sub_files;
 
 	Dir() = default;
 	Dir(std::string_view);
+	~Dir();
 
 	Dir& setOwner(std::string_view);
 	Dir& setProtection(std::string_view);
@@ -86,24 +91,37 @@ struct Dir : Node {
 	int64_t find(std::string_view);
 	Dir* getSubDir(std::string_view);
 	FsResult addDir(Dir*);
+	FsResult addDir(std::shared_ptr<Dir>);
 	FsResult addFile(File*);
+	FsResult addFile(std::shared_ptr<File>);
 	FsResult delDir(std::string_view);
 	FsResult delFile(std::string_view);
+	void clear();
 	FsResult changeTo(std::string_view);
+
+private:
+	void releaseOwnedNode(const Node*);
+	std::vector<std::shared_ptr<Node>> owned_nodes;
 };
 
 struct FileSystemCtl {
 	Dir *working_dir;
-	std::vector<std::string> current_path;
 
-	FileSystemCtl(Dir *dir) : working_dir(dir) {}
+	FileSystemCtl(Dir*);
+	Dir* getWorkingDir() const;
+	void setWorkingDir(Dir*);
 
-	bool createDir(std::string_view, Dir&);
-	bool createFile(std::string_view, File&);
-	bool gotoDir(std::string_view);
+	bool createDir(std::string_view, Dir*);
+	bool createFile(std::string_view, File*);
 	bool remove(std::string_view);
 	File* getFileByPath(std::string_view);
 	Dir* getDirByPath(std::string_view);
+
+private:
+	Dir *root_dir = nullptr;
+	Dir *tracked_dir = nullptr;
+	std::weak_ptr<Dir> working_dir_owner;
+	bool managed_working_dir = false;
 };
 
 } // namespace filesys

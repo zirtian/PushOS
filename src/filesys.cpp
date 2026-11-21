@@ -7,7 +7,6 @@
 #include "pushos/filesys.hpp"
 #include "pushos/strextens.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 using namespace pushos::filesys;
@@ -46,8 +45,8 @@ File& File::setProtection(std::string_view procode) {
 	return *this;
 }
 
-int64_t File::execute(const std::vector<std::string> &args) {
-	return executable_part(args);
+int64_t File::execute(UserFsctl* dev, const std::vector<std::string> &args) {
+	return executable_part(dev, args);
 }
 
 Dir::Dir(std::string_view name) {
@@ -58,6 +57,13 @@ Dir::Dir(std::string_view name) {
 		throw std::runtime_error("Invalid file name!");
 	}
 	file_name = fname;
+}
+
+Dir::~Dir() {
+	for (const auto &node : owned_nodes) {
+		auto *dir = dynamic_cast<Dir*>(node.get());
+		if (dir != nullptr and dir->parent_dir == this) dir->parent_dir = nullptr;
+	}
 }
 
 Dir& Dir::setOwner(std::string_view owner) {
@@ -102,9 +108,28 @@ FsResult Dir::addDir(Dir *dir) {
 	if (find(dir->file_name) != -1) {
 		return FsResult::FileExists;
 	}
-	dir->parent_dir = this;
+	for (Dir *parent = this; parent != nullptr; parent = parent->parent_dir) {
+		if (parent == dir) return FsResult::Unknown;
+	}
+	if (dir->parent_dir != nullptr and dir->parent_dir != this) {
+		return FsResult::Unknown;
+	}
 	sub_files.push_back(dir);
+	dir->parent_dir = this;
 	return FsResult::Success;
+}
+
+FsResult Dir::addDir(std::shared_ptr<Dir> dir) {
+	owned_nodes.push_back(dir);
+	FsResult result;
+	try {
+		result = addDir(dir.get());
+	} catch (...) {
+		owned_nodes.pop_back();
+		throw;
+	}
+	if (result != FsResult::Success) owned_nodes.pop_back();
+	return result;
 }
 
 FsResult Dir::addFile(File *file) {
@@ -113,6 +138,19 @@ FsResult Dir::addFile(File *file) {
 	}
 	sub_files.push_back(file);
 	return FsResult::Success;
+}
+
+FsResult Dir::addFile(std::shared_ptr<File> file) {
+	owned_nodes.push_back(file);
+	FsResult result;
+	try {
+		result = addFile(file.get());
+	} catch (...) {
+		owned_nodes.pop_back();
+		throw;
+	}
+	if (result != FsResult::Success) owned_nodes.pop_back();
+	return result;
 }
 
 FsResult Dir::delDir(std::string_view name) {
@@ -129,6 +167,7 @@ FsResult Dir::delDir(std::string_view name) {
 	if (directory->parent_dir == this) {
 		directory->parent_dir = nullptr;
 	}
+	releaseOwnedNode(directory);
 	return FsResult::Success;
 }
 
@@ -138,11 +177,34 @@ FsResult Dir::delFile(std::string_view name) {
 		return FsResult::FileNotFound;
 	}
 	const auto entry = sub_files.begin() + index;
-	if (dynamic_cast<File*>(*entry) == nullptr) {
+	auto *file = dynamic_cast<File*>(*entry);
+	if (file == nullptr) {
 		return FsResult::FileTypeError;
 	}
 	sub_files.erase(entry);
+	releaseOwnedNode(file);
 	return FsResult::Success;
+}
+
+void Dir::releaseOwnedNode(const Node *node) {
+	for (auto owned = owned_nodes.begin(); owned != owned_nodes.end(); ++owned) {
+		if (owned->get() == node) {
+			owned_nodes.erase(owned);
+			return;
+		}
+	}
+}
+
+void Dir::clear() {
+	for (auto *node : sub_files) {
+		auto *dir = dynamic_cast<Dir*>(node);
+		if (dir != nullptr and dir->parent_dir == this) {
+			dir->clear();
+			dir->parent_dir = nullptr;
+		}
+	}
+	sub_files.clear();
+	owned_nodes.clear();
 }
 
 FsResult Dir::changeTo(std::string_view single_path) {
@@ -156,7 +218,11 @@ FsResult Dir::changeTo(std::string_view single_path) {
 		return FsResult::Success;
 	}
 	if (path == "..") {
-		if (parent_dir) *this = *this->parent_dir;
+		if (parent_dir) {
+			Dir contents = *parent_dir;
+			contents.releaseOwnedNode(this);
+			*this = contents;
+		}
 		return FsResult::Success;
 	}
 	if (path == "/") {
@@ -169,36 +235,40 @@ FsResult Dir::changeTo(std::string_view single_path) {
 		if (target == nullptr) {
 			return FsResult::FileTypeError;
 		}
-		*this = *target;
+		const Dir contents = *target;
+		*this = contents;
 		return FsResult::Success;
 	}
 	return FsResult::FileNotFound;
 }
 
-bool FileSystemCtl::createDir(std::string_view location, Dir &dir) {
-	auto* parent = getDirByPath(location);
-	return parent && parent->addDir(&dir) == FsResult::Success;
+FileSystemCtl::FileSystemCtl(Dir *dir) {
+	setWorkingDir(dir);
 }
 
-bool FileSystemCtl::createFile(std::string_view location, File &file) {
-	auto* parent = getDirByPath(location);
-	return parent && parent->addFile(&file) == FsResult::Success;
+void FileSystemCtl::setWorkingDir(Dir *dir) {
+	working_dir = dir;
+	tracked_dir = dir;
+	root_dir = dir != nullptr ? dir->getSubDir("/") : nullptr;
+	working_dir_owner = dir != nullptr ? dir->weak_from_this() : std::weak_ptr<Dir>{};
+	managed_working_dir = !working_dir_owner.expired();
 }
 
-bool FileSystemCtl::gotoDir(std::string_view full_path) {
-	auto* target = getDirByPath(full_path);
-	if (target == nullptr) {
-		return false;
-	}
-	std::vector<std::string> path;
-	for (auto* dir = target; dir->parent_dir != nullptr; dir = dir->parent_dir) {
-		path.push_back(dir->file_name);
-	}
-	path.emplace_back("/");
-	std::reverse(path.begin(), path.end());
-	current_path.swap(path);
-	working_dir = target;
-	return true;
+Dir* FileSystemCtl::getWorkingDir() const {
+	if (working_dir != tracked_dir or working_dir == nullptr) return working_dir;
+	if (managed_working_dir and working_dir_owner.expired()) return root_dir;
+	if (working_dir != root_dir and working_dir->parent_dir == nullptr) return root_dir;
+	return working_dir;
+}
+
+bool FileSystemCtl::createDir(std::string_view location, Dir *dir) {
+	auto* parent = getDirByPath(location);
+	return parent && parent->addDir(dir) == FsResult::Success;
+}
+
+bool FileSystemCtl::createFile(std::string_view location, File *file) {
+	auto* parent = getDirByPath(location);
+	return parent && parent->addFile(file) == FsResult::Success;
 }
 
 bool FileSystemCtl::remove(std::string_view full_path) {
@@ -210,7 +280,8 @@ bool FileSystemCtl::remove(std::string_view full_path) {
 }
 
 File* FileSystemCtl::getFileByPath(std::string_view full_path) {
-	if (working_dir == nullptr or full_path.find('\0') != std::string_view::npos) {
+	Dir* dir = getWorkingDir();
+	if (dir == nullptr or full_path.find('\0') != std::string_view::npos) {
 		return nullptr;
 	}
 	const auto path_args = strextens::splitPath(std::string{full_path});
@@ -219,7 +290,6 @@ File* FileSystemCtl::getFileByPath(std::string_view full_path) {
 	if (file_name == "/" or file_name == "." or file_name == "..") {
 		return nullptr;
 	}
-	Dir* dir = working_dir;
 	for (size_t i = 0; i + 1 < path_args.size(); ++i) {
 		dir = dir->getSubDir(path_args[i]);
 		if (dir == nullptr) {
@@ -234,12 +304,12 @@ File* FileSystemCtl::getFileByPath(std::string_view full_path) {
 }
 
 Dir* FileSystemCtl::getDirByPath(std::string_view full_path) {
-	if (working_dir == nullptr or full_path.find('\0') != std::string_view::npos) {
+	Dir* dir = getWorkingDir();
+	if (dir == nullptr or full_path.find('\0') != std::string_view::npos) {
 		return nullptr;
 	}
 	const auto path_args = strextens::splitPath(std::string{full_path});
 	if (path_args.empty()) return nullptr;
-	Dir* dir = working_dir;
 	for (const auto& arg : path_args) {
 		dir = dir->getSubDir(arg);
 		if (dir == nullptr) {
